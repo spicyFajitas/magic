@@ -8,5 +8,6 @@ RUN pip install -r requirements.txt
 COPY . .
 
 EXPOSE 8501
+EXPOSE 8502
 
 CMD ["streamlit", "run", "web_app.py", "--server.address=0.0.0.0", "--server.port=8501"]
