@@ -1,48 +1,12 @@
 import os
 import io
-import json
 import zipfile
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
 
 import streamlit as st
 import pandas as pd
 import altair as alt
 
 from edhrec_backend import EDHRecAnalyzer
-
-###################################
-# Health Check Server (:8502/healthz)
-###################################
-
-HEALTH_PORT = 8502
-
-
-class _HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == "/healthz":
-            body = json.dumps({"status": "ok", "app": "EDHRec"}).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        else:
-            self.send_response(404)
-            self.end_headers()
-
-    def log_message(self, *_):
-        pass  # suppress access log noise
-
-
-@st.cache_resource
-def _start_health_server():
-    server = HTTPServer(("0.0.0.0", HEALTH_PORT), _HealthHandler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server
-
-
-_start_health_server()
 
 analyzer = EDHRecAnalyzer()
 
