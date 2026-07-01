@@ -1,0 +1,15 @@
+// Scrape metrics from the EDHRec analyzer app
+prometheus.scrape "edhrec_app" {
+  targets = [{
+    __address__ = "edhrec-analyzer:8502",
+  }]
+  scrape_interval = "15s"
+  forward_to      = [prometheus.remote_write.mimir.receiver]
+}
+
+// Forward metrics to Mimir
+prometheus.remote_write "mimir" {
+  endpoint {
+    url = "http://mimir:9009/api/v1/push"
+  }
+}
