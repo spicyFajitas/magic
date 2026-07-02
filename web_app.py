@@ -1,31 +1,12 @@
 import os
 import io
-import time
-import logging
 import zipfile
 
 import streamlit as st
 import pandas as pd
 import altair as alt
-from prometheus_client import Counter, Histogram, start_http_server
 
 from edhrec_backend import EDHRecAnalyzer
-
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-_log = logging.getLogger(__name__)
-
-ANALYSES_STARTED = Counter("edhrec_analyses_started_total", "Analysis runs started")
-ANALYSES_COMPLETED = Counter("edhrec_analyses_completed_total", "Analysis runs completed")
-ANALYSES_FAILED = Counter("edhrec_analyses_failed_total", "Analysis runs failed")
-ANALYSIS_DURATION = Histogram("edhrec_analysis_duration_seconds", "End-to-end analysis duration")
-
-
-@st.cache_resource
-def _start_metrics_server():
-    start_http_server(8502)
-
-
-_start_metrics_server()
 
 analyzer = EDHRecAnalyzer()
 
@@ -147,9 +128,6 @@ final_status_box = st.empty()
 ###################################
 
 if run_button:
-    ANALYSES_STARTED.inc()
-    _t0 = time.time()
-    _log.info("analysis started commander=%s", commander_name)
     st.session_state.results_ready = False
 
     if not commander_name.strip():
@@ -302,17 +280,11 @@ if run_button:
         analyzer.save_cardtypes(type_groups, output_dir, metadata_header)
 
         # Done
-        _duration = time.time() - _t0
-        ANALYSES_COMPLETED.inc()
-        ANALYSIS_DURATION.observe(_duration)
-        _log.info("analysis completed commander=%s duration=%.1fs", commander_name, _duration)
         st.session_state.final_status = "success"
         st.session_state.results_ready = True
 
 
     except Exception as e:
-        ANALYSES_FAILED.inc()
-        _log.error("analysis failed commander=%s error=%s", commander_name, e)
         st.session_state.final_status = "error"
         final_status_box.error(f"❌ Error: {e}")
         st.stop()
