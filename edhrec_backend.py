@@ -14,6 +14,14 @@ try:
 except Exception:
     TK_AVAILABLE = False
 
+# Scryfall rejects requests.get()'s default User-Agent with a 400
+# ("generic_user_agent") -- https://scryfall.com/docs/api requires a
+# custom one identifying the calling app.
+SCRYFALL_HEADERS = {
+    "User-Agent": "edhrec-deck-analyzer/1.0 (+https://github.com/spicyFajitas/edhrec-deck-building-scripts)",
+    "Accept": "application/json",
+}
+
 
 ########################
 # EDHRec Analyzer Class
@@ -277,40 +285,47 @@ class EDHRecAnalyzer:
 
         # Old cache format (string only)
         if isinstance(cached, str):
-            # Upgrade cache entry
-            meta = self._fetch_scryfall_metadata(card_name)
-            self.scryfall_cache[card_name] = meta
-            self.save_scryfall_cache()
-            return meta["type_line"]
+            return cached
 
         # Not cached at all
         meta = self._fetch_scryfall_metadata(card_name)
+        if meta is None:
+            return "Unknown"
         self.scryfall_cache[card_name] = meta
         self.save_scryfall_cache()
         return meta["type_line"]
 
     def _fetch_scryfall_metadata(self, card_name: str):
+        """Returns the metadata dict on success, or None on failure.
+
+        Failures (rate limiting, transient errors) are intentionally not
+        cached by callers so a card can be retried on a later lookup
+        instead of being stuck as "Unknown" forever.
+        """
         self.rate_limit_scryfall()
 
         url = f"https://api.scryfall.com/cards/named?exact={card_name}"
-        r = requests.get(url)
+        r = requests.get(url, headers=SCRYFALL_HEADERS)
 
         if r.status_code != 200:
-            return {
-                "type_line": "Unknown",
-                "image_url": None,
-                "scryfall_uri": None,
-            }
+            return None
 
         card = r.json()
+        type_line = card.get("type_line", "Unknown")
+        scryfall_uri = card.get("scryfall_uri")
 
-        return {
-            "type_line": card.get("type_line", "Unknown"),
-            "image_url": card.get("image_uris", {}).get("normal"),
-            "scryfall_uri": card.get("scryfall_uri"),
-        }
+        image_url = None
+        # normal single-face images
+        if isinstance(card.get("image_uris"), dict):
+            image_url = card["image_uris"].get("normal")
 
+        # double-faced / split / transform cards
+        if not image_url and isinstance(card.get("card_faces"), list) and card["card_faces"]:
+            face0 = card["card_faces"][0]
+            if isinstance(face0.get("image_uris"), dict):
+                image_url = face0["image_uris"].get("normal")
 
+        return {"type_line": type_line, "image_url": image_url, "scryfall_uri": scryfall_uri}
 
     # ✅ NEW: minimal add-on for images + link
     def get_card_metadata(self, card_name: str):
@@ -341,29 +356,9 @@ class EDHRecAnalyzer:
                 "scryfall_uri": None,
             }
 
-        self.rate_limit_scryfall()
-        url = f"https://api.scryfall.com/cards/named?exact={card_name}"
-        r = requests.get(url)
-
-        if r.status_code != 200:
-            meta = {"type_line": "Unknown", "image_url": None, "scryfall_uri": None}
-        else:
-            card = r.json()
-            type_line = card.get("type_line", "Unknown")
-            image_url = None
-            scryfall_uri = card.get("scryfall_uri")
-
-            # normal single-face images
-            if isinstance(card.get("image_uris"), dict):
-                image_url = card["image_uris"].get("normal")
-
-            # double-faced / split / transform cards
-            if not image_url and isinstance(card.get("card_faces"), list) and card["card_faces"]:
-                face0 = card["card_faces"][0]
-                if isinstance(face0.get("image_uris"), dict):
-                    image_url = face0["image_uris"].get("normal")
-
-            meta = {"type_line": type_line, "image_url": image_url, "scryfall_uri": scryfall_uri}
+        meta = self._fetch_scryfall_metadata(card_name)
+        if meta is None:
+            return {"type_line": "Unknown", "image_url": None, "scryfall_uri": None}
 
         # store dict format (upgrade path)
         self.scryfall_cache[card_name] = meta
