@@ -14,10 +14,21 @@ from edhrec_backend import EDHRecAnalyzer
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 _log = logging.getLogger(__name__)
 
-ANALYSES_STARTED = Counter("edhrec_analyses_started_total", "Analysis runs started")
-ANALYSES_COMPLETED = Counter("edhrec_analyses_completed_total", "Analysis runs completed")
-ANALYSES_FAILED = Counter("edhrec_analyses_failed_total", "Analysis runs failed")
-ANALYSIS_DURATION = Histogram("edhrec_analysis_duration_seconds", "End-to-end analysis duration")
+@st.cache_resource
+def _init_metrics():
+    return {
+        "started": Counter("edhrec_analyses_started_total", "Analysis runs started"),
+        "completed": Counter("edhrec_analyses_completed_total", "Analysis runs completed"),
+        "failed": Counter("edhrec_analyses_failed_total", "Analysis runs failed"),
+        "duration": Histogram("edhrec_analysis_duration_seconds", "End-to-end analysis duration"),
+    }
+
+
+_metrics = _init_metrics()
+ANALYSES_STARTED = _metrics["started"]
+ANALYSES_COMPLETED = _metrics["completed"]
+ANALYSES_FAILED = _metrics["failed"]
+ANALYSIS_DURATION = _metrics["duration"]
 
 
 @st.cache_resource
