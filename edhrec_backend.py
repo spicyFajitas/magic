@@ -42,12 +42,17 @@ class EDHRecAnalyzer:
         self.cache_root = "./cache"
         self.deck_cache_dir = os.path.join(self.cache_root, "deck_cache")
         self.scryfall_cache_path = os.path.join(self.cache_root, "scryfall_cache.json")
+        self.history_path = os.path.join(self.cache_root, "search_history.json")
 
         os.makedirs(self.cache_root, exist_ok=True)
         os.makedirs(self.deck_cache_dir, exist_ok=True)
 
         # Scryfall cache
         self.scryfall_cache = self.load_scryfall_cache()
+
+        # In-memory only: commander typeahead results for this process's
+        # lifetime. Cheap to regenerate, not worth persisting to disk.
+        self.commander_search_cache = {}
 
     #################
     # Rate limiting
@@ -365,6 +370,43 @@ class EDHRecAnalyzer:
         self.save_scryfall_cache()
         return meta
 
+    ####################################
+    # Commander Search (typeahead)
+    ####################################
+
+    def search_commander_names(self, query: str, limit: int = 8):
+        """
+        Returns up to `limit` legal-commander card names matching `query`
+        (substring match against card name), via Scryfall's search API.
+        Short queries return no results to avoid a network call on every
+        single character typed.
+        """
+        query = query.replace('"', "").strip()
+        if len(query) < 2:
+            return []
+
+        if query in self.commander_search_cache:
+            return self.commander_search_cache[query]
+
+        self.rate_limit_scryfall()
+
+        try:
+            r = requests.get(
+                "https://api.scryfall.com/cards/search",
+                headers=SCRYFALL_HEADERS,
+                params={"q": f'is:commander name:"{query}"', "order": "name"},
+                timeout=5,
+            )
+        except requests.RequestException:
+            return []
+
+        # Scryfall returns 404 for zero matches; anything else just
+        # yields no suggestions rather than surfacing an error to the UI.
+        results = [card["name"] for card in r.json().get("data", [])[:limit]] if r.status_code == 200 else []
+
+        self.commander_search_cache[query] = results
+        return results
+
     ###################################
     # Deck Processing (Card Counting)
     ###################################
@@ -476,6 +518,40 @@ class EDHRecAnalyzer:
                 f.write("\n".join(d))
                 f.write("\n\n")
         return decklist_path
+
+    ###################################
+    # Search History
+    ###################################
+
+    def load_search_history(self):
+        if os.path.exists(self.history_path):
+            try:
+                with open(self.history_path, "r") as f:
+                    return json.load(f)
+            except Exception:
+                return []
+        return []
+
+    def save_search_history(
+        self, commander_name, formatted_name, recent, min_price, max_price,
+        deck_count, card_count, max_entries: int = 50,
+    ):
+        entry = {
+            "commander_name": commander_name,
+            "formatted_name": formatted_name,
+            "recent": recent,
+            "min_price": min_price,
+            "max_price": max_price,
+            "deck_count": deck_count,
+            "card_count": card_count,
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+        }
+        history = self.load_search_history()
+        history.append(entry)
+        history = history[-max_entries:]
+        with open(self.history_path, "w") as f:
+            json.dump(history, f, indent=2)
+        return history
 
 
 ####################

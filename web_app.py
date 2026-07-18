@@ -93,10 +93,55 @@ defaults = {
     "card_counts": None,
     "type_groups": None,
     "final_status": None,
+    "form_gen": 0,
 }
 
 for key, value in defaults.items():
     st.session_state.setdefault(key, value)
+
+
+def field_key(base):
+    """Namespaces input widget keys by form_gen so History/search-suggestion
+    selections can pre-fill them: bumping form_gen gives every input a key
+    it's never used before, which is the only way Streamlit allows setting
+    a widget's value via session_state after it's already been rendered
+    once."""
+    return f"{base}_{st.session_state.form_gen}"
+
+
+def apply_history_entry(entry):
+    st.session_state.form_gen += 1
+    st.session_state[field_key("commander_name")] = entry["commander_name"]
+    st.session_state[field_key("recent")] = entry["recent"]
+    st.session_state[field_key("min_price")] = entry["min_price"]
+    st.session_state[field_key("max_price")] = entry["max_price"]
+    st.session_state["_trigger_run"] = True
+    st.rerun()
+
+
+###################################
+# Search History
+###################################
+
+search_history = analyzer.load_search_history()
+
+if search_history:
+    with st.expander(f"🕘 Recent Searches ({len(search_history)})"):
+        for idx, entry in enumerate(reversed(search_history[-10:])):
+            cols = st.columns([4, 1])
+            with cols[0]:
+                st.markdown(
+                    f"**{entry['commander_name']}** — "
+                    f"{entry.get('deck_count', '?')} decks, "
+                    f"{entry.get('card_count', '?')} cards"
+                )
+                st.caption(
+                    f"{entry['timestamp']} · recent={entry['recent']} · "
+                    f"price=${entry['min_price']:.0f}–${entry['max_price']:.0f}"
+                )
+            with cols[1]:
+                if st.button("🔁 Re-run", key=f"rerun_history_{idx}"):
+                    apply_history_entry(entry)
 
 ###################################
 # Inputs
@@ -104,18 +149,39 @@ for key, value in defaults.items():
 
 st.header("Commander Selection")
 
+search_query = st.text_input(
+    "Search for a commander",
+    key=field_key("commander_search"),
+    placeholder="Start typing… e.g. Atraxa (press Enter to search)",
+)
+
+if search_query.strip():
+    suggestions = analyzer.search_commander_names(search_query)
+    if suggestions:
+        st.caption("Matching commanders — click to select:")
+        for name in suggestions:
+            if st.button(name, key=f"suggest_{st.session_state.form_gen}_{name}"):
+                st.session_state.form_gen += 1
+                st.session_state[field_key("commander_name")] = name
+                st.rerun()
+    else:
+        st.caption("No matching commanders found — try a different spelling.")
+
 commander_name = st.text_input(
     "Commander Name",
-    # value=default_commander,
+    key=field_key("commander_name"),
     placeholder="e.g. Atraxa, Praetors' Voice"
 )
 
 st.header("Deck Query Filters")
-recent = st.number_input("How many recent decks to fetch?", 5, 200, 20, 5)
-min_price = st.number_input("Minimum deck price", 5, 10000, 5, 5)
-max_price = st.number_input("Maximum deck price", 5, 10000, 100, 5)
+recent = st.number_input("How many recent decks to fetch?", 5, 200, 20, 5, key=field_key("recent"))
+min_price = st.number_input("Minimum deck price", 5, 10000, 5, 5, key=field_key("min_price"))
+max_price = st.number_input("Maximum deck price", 5, 10000, 100, 5, key=field_key("max_price"))
 
 run_button = st.button("Fetch & Analyze Decklists")
+
+if st.session_state.pop("_trigger_run", False):
+    run_button = True
 
 if not st.session_state.results_ready and not run_button:
     st.info("Ready when you are — enter your commander and press the button!")
@@ -278,6 +344,16 @@ if run_button:
 
         st.session_state.type_groups = type_groups
         analyzer.save_cardtypes(type_groups, output_dir, metadata_header)
+
+        analyzer.save_search_history(
+            commander_name=commander_name,
+            formatted_name=formatted_name,
+            recent=int(recent),
+            min_price=float(min_price),
+            max_price=float(max_price),
+            deck_count=len(deck_hashes),
+            card_count=len(card_counts),
+        )
 
         # Done
         st.session_state.final_status = "success"
