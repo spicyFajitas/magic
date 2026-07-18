@@ -453,7 +453,14 @@ if st.session_state.results_ready:
                         unsafe_allow_html=True
                     )
                 else:
-                    st.markdown(f"**{count}×** [{card}]({url})")
+                    st.markdown(
+                        f"""
+                        <div class="card-hover">
+                            <b>{count}×</b> <a href="{url}" target="_blank">{card}</a>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
 
         elif preview_file != "(none)":
             st.info("Select a master list or card type file to display images.")
