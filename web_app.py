@@ -1,14 +1,38 @@
 import os
 import io
+import time
 import zipfile
+import threading
 
 import streamlit as st
 import pandas as pd
 import altair as alt
+from prometheus_client import Counter, Histogram, start_http_server
 
 from edhrec_backend import EDHRecAnalyzer
 
 analyzer = EDHRecAnalyzer()
+
+# ── Prometheus metrics (port 8502, matches kubernetes/apps/magic/03-service.yaml) ──
+ANALYSES_STARTED = Counter("edhrec_analyses_started_total", "Total deck analyses started")
+ANALYSES_COMPLETED = Counter("edhrec_analyses_completed_total", "Total deck analyses completed successfully")
+ANALYSES_FAILED = Counter("edhrec_analyses_failed_total", "Total deck analyses failed")
+ANALYSIS_DURATION = Histogram(
+    "edhrec_analysis_duration_seconds",
+    "End-to-end analysis duration in seconds",
+    buckets=[1, 5, 10, 30, 60, 120, 300],
+)
+
+
+def _start_metrics_server():
+    try:
+        start_http_server(8502)
+    except OSError:
+        pass  # already started in a previous Streamlit rerun
+
+
+threading.Thread(target=_start_metrics_server, daemon=True).start()
+# ─────────────────────────────────────────────────────────────────────────────
 
 ###################################
 # Streamlit UI Setup
@@ -200,6 +224,8 @@ if run_button:
         st.warning("Enter a commander name first.")
         st.stop()
 
+    ANALYSES_STARTED.inc()
+    _analysis_start = time.time()
     active_step = st.empty()   # ⭐ SINGLE ACTIVE STEP SLOT
 
     formatted_name = analyzer.format_commander_name(commander_name)
@@ -356,11 +382,14 @@ if run_button:
         )
 
         # Done
+        ANALYSES_COMPLETED.inc()
+        ANALYSIS_DURATION.observe(time.time() - _analysis_start)
         st.session_state.final_status = "success"
         st.session_state.results_ready = True
 
 
     except Exception as e:
+        ANALYSES_FAILED.inc()
         st.session_state.final_status = "error"
         final_status_box.error(f"❌ Error: {e}")
         st.stop()

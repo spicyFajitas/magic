@@ -4,6 +4,7 @@ services:
     container_name: edhrec-analyzer
     ports:
       - "8501:8501"
+      - "8502:8502"   # Prometheus metrics
     volumes:
       - ./cache:/app/cache
       - ./output:/app/output
