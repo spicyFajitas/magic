@@ -249,10 +249,6 @@ if run_button:
     )
 
     try:
-        # Step 1 — Build ID
-        active_step.info("🔄 Detecting EDHREC build ID…")
-        build_id = analyzer.fetch_edhrec_build_id()
-
         if not formatted_name or "-" not in formatted_name:
             st.warning(
                 "Commander name looks incomplete.\n\n"

@@ -35,9 +35,6 @@ class EDHRecAnalyzer:
         self.SCRYFALL_MIN_DELAY = 0.12   # Scryfall: 50–100ms requested
         self.EDHREC_MIN_DELAY = 0.80     # EDHREC safe delay
 
-        # Build ID cache
-        self.build_id = None
-
         # Cache paths
         self.cache_root = "./cache"
         self.deck_cache_dir = os.path.join(self.cache_root, "deck_cache")
@@ -82,48 +79,6 @@ class EDHRecAnalyzer:
         formatted_name = formatted_name.replace(" ", "-")
         formatted_name = formatted_name.replace("'", "")
         return formatted_name
-
-    ###########################
-    # Build Manifest Fetching #
-    ###########################
-
-    def fetch_edhrec_build_id(self):
-        """
-        Fetches the EDHREC build ID by parsing the homepage HTML and extracting:
-        /_next/static/<BUILD_ID>/_buildManifest.js
-        """
-        if self.build_id:
-            return self.build_id
-
-        self.rate_limit_edhrec()
-        r = requests.get("https://edhrec.com")
-        if r.status_code != 200:
-            raise Exception("Failed to load EDHREC homepage to detect build ID")
-
-        html = r.text
-
-        marker = "_buildManifest.js"
-        idx = html.find(marker)
-        if idx == -1:
-            raise Exception("Could not find _buildManifest.js reference in homepage.")
-
-        prefix = html[:idx]
-
-        static_marker = "/_next/static/"
-        static_idx = prefix.rfind(static_marker)
-        if static_idx == -1:
-            raise Exception("Could not locate /_next/static/ in homepage.")
-
-        start = static_idx + len(static_marker)
-        end = prefix.find("/", start)
-        build_id = prefix[start:end]
-
-        if not build_id or len(build_id) < 5:
-            raise Exception(f"Extracted invalid EDHREC build ID: '{build_id}'")
-
-        self.build_id = build_id
-        print(f"[INFO] EDHREC build ID detected: {build_id}")
-        return build_id
 
     ##########################
     # Output Directory Cleanup
@@ -232,11 +187,12 @@ class EDHRecAnalyzer:
         if cached:
             return cached
 
-        if not self.build_id:
-            self.fetch_edhrec_build_id()
-
+        # EDHREC moved to the Next.js App Router (2026-10), which dropped both
+        # the _buildManifest.js build ID and the /_next/data/<build_id>/
+        # deckpreview JSON route this used to read. /api/deckpreview/ returns
+        # the same deck dict (commander_v2 + cards) at the top level.
         self.rate_limit_edhrec()
-        url = f"https://edhrec.com/_next/data/{self.build_id}/deckpreview/{deck_id}.json?deckId={deck_id}"
+        url = f"https://edhrec.com/api/deckpreview/{deck_id}"
         r = requests.get(url)
 
         if r.status_code != 200:
@@ -244,7 +200,7 @@ class EDHRecAnalyzer:
             return None
 
         try:
-            raw = r.json()["pageProps"]["data"]["deck"]
+            raw = r.json()["deck"]
         except KeyError:
             print(f"Deck JSON format unexpected for {deck_id}")
             return None
@@ -649,9 +605,6 @@ _analyzer = EDHRecAnalyzer()
 def format_commander_name(commander_name: str):
     return _analyzer.format_commander_name(commander_name)
 
-def fetch_edhrec_build_id():
-    return _analyzer.fetch_edhrec_build_id()
-
 def clean_output_directories(formatted_name: str):
     return _analyzer.clean_output_directories(formatted_name)
 
@@ -697,7 +650,6 @@ def main():
     formatted_name = _analyzer.format_commander_name(commander_name)
     output_directory = _analyzer.clean_output_directories(formatted_name)
 
-    _analyzer.fetch_edhrec_build_id()
     deck_table = _analyzer.fetch_deck_table(formatted_name)
 
     deck_hashes = _analyzer.filter_deck_hashes(deck_table, recent, min_price, max_price)
