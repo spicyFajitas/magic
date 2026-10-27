@@ -9,6 +9,16 @@ ANALYSIS_DURATION = Histogram(
     "End-to-end analysis duration in seconds",
     buckets=[1, 5, 10, 30, 60, 120, 300],
 )
+# outcome: success | not_found | no_decks | error. not_found/no_decks end
+# the run via st.stop(), which raises a BaseException rather than an
+# Exception, so they never reach ANALYSES_COMPLETED or ANALYSES_FAILED.
+ANALYSIS_OUTCOMES = Counter("edhrec_analysis_outcomes_total", "Deck analyses by outcome", ["outcome"])
+# Only incremented on success, so every label value is a commander EDHRec
+# actually knows about -- never raw user input (keeps cardinality bounded).
+COMMANDER_ANALYSES = Counter(
+    "edhrec_commander_analyses_total", "Successful deck analyses per commander", ["commander"]
+)
+SESSIONS_STARTED = Counter("edhrec_sessions_started_total", "Browser sessions started")
 
 
 def _start_server():

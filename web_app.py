@@ -12,7 +12,16 @@ from edhrec_backend import EDHRecAnalyzer
 # rerun), so the Counter/Histogram objects and the HTTP server thread are
 # created exactly once per process lifetime regardless of how many times
 # Streamlit re-runs this script.
-from metrics import ANALYSES_STARTED, ANALYSES_COMPLETED, ANALYSES_FAILED, ANALYSIS_DURATION
+from metrics import (
+    ANALYSES_STARTED,
+    ANALYSES_COMPLETED,
+    ANALYSES_FAILED,
+    ANALYSIS_DURATION,
+    ANALYSIS_OUTCOMES,
+    COMMANDER_ANALYSES,
+    SESSIONS_STARTED,
+)
+from access_log import log_event
 
 analyzer = EDHRecAnalyzer()
 
@@ -104,6 +113,12 @@ defaults = {
 
 for key, value in defaults.items():
     st.session_state.setdefault(key, value)
+
+# Once per browser session, not per rerun -- session_state survives reruns.
+if not st.session_state.get("_session_logged"):
+    st.session_state._session_logged = True
+    SESSIONS_STARTED.inc()
+    log_event("session_start")
 
 
 def field_key(base):
@@ -210,6 +225,19 @@ if run_button:
     _analysis_start = time.time()
     active_step = st.empty()   # ⭐ SINGLE ACTIVE STEP SLOT
 
+    def record_outcome(outcome, **fields):
+        ANALYSIS_OUTCOMES.labels(outcome=outcome).inc()
+        log_event(
+            "analysis",
+            outcome=outcome,
+            commander=commander_name,
+            recent=int(recent),
+            min_price=float(min_price),
+            max_price=float(max_price),
+            duration_s=round(time.time() - _analysis_start, 2),
+            **fields,
+        )
+
     formatted_name = analyzer.format_commander_name(commander_name)
 
     st.session_state.update(
@@ -247,6 +275,7 @@ if run_button:
                 "- full card name (no nicknames)\n\n"
                 "Example: *Atraxa, Praetors' Voice*"
             )
+            record_outcome("not_found")
             st.stop()
 
 
@@ -267,6 +296,7 @@ if run_button:
                 "- widening the price range\n"
                 "- removing the minimum price filter"
             )
+            record_outcome("no_decks")
             st.stop()
 
 
@@ -366,12 +396,15 @@ if run_button:
         # Done
         ANALYSES_COMPLETED.inc()
         ANALYSIS_DURATION.observe(time.time() - _analysis_start)
+        COMMANDER_ANALYSES.labels(commander=formatted_name).inc()
+        record_outcome("success", deck_count=len(deck_hashes), card_count=len(card_counts))
         st.session_state.final_status = "success"
         st.session_state.results_ready = True
 
 
     except Exception as e:
         ANALYSES_FAILED.inc()
+        record_outcome("error", error=str(e))
         st.session_state.final_status = "error"
         final_status_box.error(f"❌ Error: {e}")
         st.stop()
